@@ -1,0 +1,3 @@
+"""
+Anernan backend application package.
+"""

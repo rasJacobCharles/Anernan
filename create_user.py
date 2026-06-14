@@ -1,0 +1,70 @@
+import argparse
+import sys
+import uuid
+from getpass import getpass
+
+from app.database import SessionLocal
+from app.models import User
+from app.auth import get_password_hash
+
+def main():
+    parser = argparse.ArgumentParser(description="Create a new user account in Anernan database.")
+    parser.add_argument("--username", type=str, help="Username for the new user account.")
+    parser.add_argument("--password", type=str, help="Password for the new user account.")
+    parser.add_argument("--admin", action="store_true", help="Grant administrator privileges to the new user.")
+    
+    args = parser.parse_args()
+    
+    username = args.username
+    password = args.password
+    
+    if not username:
+        username = input("Username: ").strip()
+        if not username:
+            print("Error: Username cannot be empty.", file=sys.stderr)
+            sys.exit(1)
+            
+    if not password:
+        password = getpass("Password: ")
+        confirm_password = getpass("Confirm Password: ")
+        if password != confirm_password:
+            print("Error: Passwords do not match.", file=sys.stderr)
+            sys.exit(1)
+        if not password:
+            print("Error: Password cannot be empty.", file=sys.stderr)
+            sys.exit(1)
+            
+    db = SessionLocal()
+    try:
+        # Check if username already exists
+        existing_user = db.query(User).filter(User.username == username).first()
+        if existing_user:
+            print(f"Error: Username '{username}' is already registered.", file=sys.stderr)
+            sys.exit(1)
+            
+        # Check if this is the first user
+        is_first_user = db.query(User).count() == 0
+        is_admin = args.admin or is_first_user
+        
+        hashed_pw = get_password_hash(password)
+        new_user = User(
+            id=str(uuid.uuid4()),
+            username=username,
+            hashed_password=hashed_pw,
+            is_admin=is_admin
+        )
+        
+        db.add(new_user)
+        db.commit()
+        
+        admin_str = " (Admin)" if is_admin else ""
+        print(f"Success: User '{username}'{admin_str} successfully created!")
+    except Exception as e:
+        print(f"Error: Failed to create user: {e}", file=sys.stderr)
+        db.rollback()
+        sys.exit(1)
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    main()

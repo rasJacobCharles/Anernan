@@ -7,7 +7,7 @@ tables, and registers routers.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base
-from .routers import auth
+from .routers import auth, documents
 
 # Create database tables if they do not exist
 Base.metadata.create_all(bind=engine)
@@ -29,6 +29,7 @@ app.add_middleware(
 
 # Register routers
 app.include_router(auth.router)
+app.include_router(documents.router)
 
 @app.get("/")
 def read_root():

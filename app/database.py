@@ -7,7 +7,9 @@ to optimise concurrent access.
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "sqlite:///./anernan.db"
+import os
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./anernan.db")
 
 # Create the engine with check_same_thread=False for SQLite multithreading compatibility
 engine = create_engine(

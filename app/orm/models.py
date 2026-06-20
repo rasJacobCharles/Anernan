@@ -4,9 +4,12 @@ Defines tables for users and documents with relationship mappings.
 """
 
 import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, JSON
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, JSON, String
 from sqlalchemy.orm import relationship
-from .database import Base
+
+from .management.session import Base
+
 
 class User(Base):
     """
@@ -19,7 +22,9 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = Column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False
+    )
 
     # Relationships
     uploaded_documents = relationship(
@@ -45,11 +50,17 @@ class Document(Base):
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
     file_type = Column(String, nullable=False)  # 'pdf' or 'md'
-    status = Column(String, default="pending_approval", nullable=False)  # 'pending_approval' or 'approved'
+    # 'pending_approval' or 'approved'
+    status = Column(
+        String, default="pending_approval", nullable=False
+    )
     summary = Column(String, nullable=True)
-    tags = Column(JSON, nullable=True)  # JSON list of tags (e.g. ["AI", "Research"])
+    # JSON list of tags (e.g. ["AI", "Research"])
+    tags = Column(JSON, nullable=True)
     uploader_id = Column(String, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = Column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False
+    )
     approved_at = Column(DateTime, nullable=True)
     approved_by = Column(String, ForeignKey("users.id"), nullable=True)
 

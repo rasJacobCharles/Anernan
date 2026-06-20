@@ -4,18 +4,19 @@ Provides endpoints for uploading documents, listing pending documents,
 approving documents, and rejecting documents.
 """
 
-import os
-import uuid
-import json
-import shutil
 import datetime
+import json
+import os
+import shutil
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form
+import uuid
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from .. import models, schemas
-from ..dependencies import get_current_user, get_current_admin
+from .. import model as schemas
+from ..dependencies import get_current_admin, get_current_user
+from ..orm import get_db, models
 
 router = APIRouter(
     tags=["Documents"]
@@ -30,8 +31,11 @@ try:
     os.makedirs(QUARANTINE_DIR, exist_ok=True)
     os.makedirs(ACTIVE_DIR, exist_ok=True)
 except Exception:
-    # Fallback to project-relative vault directory on systems with restricted root access (e.g. macOS development)
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Fallback to project-relative vault directory on systems with
+    # restricted root access (e.g. macOS development)
+    BASE_DIR = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
     VAULT_BASE = os.path.join(BASE_DIR, "vault")
     QUARANTINE_DIR = os.path.join(VAULT_BASE, "quarantine")
     ACTIVE_DIR = os.path.join(VAULT_BASE, "active")
@@ -39,18 +43,23 @@ except Exception:
     os.makedirs(ACTIVE_DIR, exist_ok=True)
 
 
-@router.post("/api/v1/documents/upload", response_model=schemas.DocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/api/v1/documents/upload",
+    response_model=schemas.DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def upload_document(
     file: UploadFile = File(...),
     pre_parsed_markdown: Optional[str] = Form(None),
     summary: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user),
 ):
     """
-    Handle document upload, perform MIME-type validation, store the file in the
-    quarantined directory, and save the metadata record in the database as pending approval.
+    Handle document upload, perform MIME-type validation, store the
+    file in the quarantined directory, and save the metadata record in
+    the database as pending approval.
     """
     filename = file.filename
     if not filename:
@@ -65,7 +74,11 @@ async def upload_document(
 
     if ext == ".pdf" and content_type == "application/pdf":
         file_type = "pdf"
-    elif ext in (".md", ".markdown") and content_type in ("text/markdown", "text/plain", "application/octet-stream"):
+    elif ext in (".md", ".markdown") and content_type in (
+        "text/markdown",
+        "text/plain",
+        "application/octet-stream",
+    ):
         file_type = "md"
     elif ext == ".pdf":
         file_type = "pdf"
@@ -110,7 +123,8 @@ async def upload_document(
         with open(file_path, "wb") as f:
             f.write(content)
         
-        # If pre-parsed markdown text is provided for a PDF, save it as a companion markdown file
+        # If pre-parsed markdown text is provided for a PDF, save it
+        # as a companion markdown file
         if file_type == "pdf" and pre_parsed_markdown:
             companion_md_path = os.path.splitext(file_path)[0] + ".md"
             with open(companion_md_path, "w", encoding="utf-8") as f:
@@ -146,27 +160,38 @@ async def upload_document(
     return new_doc
 
 
-@router.get("/api/v1/admin/pending", response_model=List[schemas.DocumentResponse])
+@router.get(
+    "/api/v1/admin/pending",
+    response_model=List[schemas.DocumentResponse],
+)
 def list_pending_documents(
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(get_current_admin)
+    current_admin: models.User = Depends(get_current_admin),
 ):
     """
     List all documents currently pending admin review.
     """
-    pending_docs = db.query(models.Document).filter(models.Document.status == "pending_approval").all()
+    pending_docs = (
+        db.query(models.Document)
+        .filter(models.Document.status == "pending_approval")
+        .all()
+    )
     return pending_docs
 
 
-@router.post("/api/v1/admin/documents/{id}/approve", response_model=schemas.DocumentResponse)
+@router.post(
+    "/api/v1/admin/documents/{id}/approve",
+    response_model=schemas.DocumentResponse,
+)
 def approve_document(
     id: str,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(get_current_admin)
+    current_admin: models.User = Depends(get_current_admin),
 ):
     """
     Approve a pending document, transitioning status to approved,
-    moving the physical file(s) to the active directory, and logging approval metadata.
+    moving the physical file(s) to the active directory, and logging
+    approval metadata.
     """
     doc = db.query(models.Document).filter(models.Document.id == id).first()
     if not doc:
@@ -203,7 +228,10 @@ def approve_document(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to move document file to active storage: {str(e)}"
+            detail=(
+                f"Failed to move document file to active storage: "
+                f"{str(e)}"
+            ),
         )
 
     # Update database record status and metadata
@@ -222,11 +250,11 @@ def approve_document(
 def reject_document(
     id: str,
     db: Session = Depends(get_db),
-    current_admin: models.User = Depends(get_current_admin)
+    current_admin: models.User = Depends(get_current_admin),
 ):
     """
-    Reject a pending document, removing the physical file(s) from quarantine
-    and deleting the database record.
+    Reject a pending document, removing the physical file(s) from
+    quarantine and deleting the database record.
     """
     doc = db.query(models.Document).filter(models.Document.id == id).first()
     if not doc:
@@ -255,7 +283,10 @@ def reject_document(
         # Log error or raise HTTP error, but we want to ensure db cleanup is still possible
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete document files from quarantine: {str(e)}"
+            detail=(
+                f"Failed to delete document files from quarantine: "
+                f"{str(e)}"
+            ),
         )
 
     # Delete the database record

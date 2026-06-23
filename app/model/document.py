@@ -13,6 +13,7 @@ class DocumentBase(BaseModel):
     file_type: str
     summary: Optional[str] = None
     tags: Optional[List[str]] = None
+    folder: Optional[str] = None
 
 
 class DocumentCreate(DocumentBase):

@@ -57,6 +57,7 @@ class Document(Base):
     summary = Column(String, nullable=True)
     # JSON list of tags (e.g. ["AI", "Research"])
     tags = Column(JSON, nullable=True)
+    folder = Column(String, nullable=True)
     uploader_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(
         DateTime, default=datetime.datetime.utcnow, nullable=False

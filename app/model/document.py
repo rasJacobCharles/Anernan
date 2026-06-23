@@ -33,5 +33,10 @@ class DocumentResponse(DocumentBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DocumentContentResponse(DocumentResponse):
+    content: str
+
+
 class DocumentApproval(BaseModel):
     status: str  # 'approved' or 'rejected'
+

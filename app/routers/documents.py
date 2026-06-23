@@ -11,7 +11,8 @@ import shutil
 from typing import List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Query
+from sqlalchemy import select, func, literal_column, or_
 from sqlalchemy.orm import Session
 
 from .. import model as schemas
@@ -317,3 +318,125 @@ def reject_document(
     db.commit()
 
     return {"detail": "Document successfully rejected and deleted."}
+
+
+@router.get(
+    "/api/v1/search",
+    response_model=List[schemas.DocumentResponse],
+)
+def search_documents(
+    q: Optional[str] = Query(None, description="General search query matching filename, folder, summary, or tags"),
+    tag: Optional[str] = Query(None, description="Filter by a specific tag"),
+    folder: Optional[str] = Query(None, description="Filter by a specific folder"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Search the vault for approved documents matching the query criteria.
+    Supports filtering by general query (filename, folder, summary, tags), tag, and folder.
+    Protected by JWT Bearer token authentication.
+    Only returns documents that have the status 'approved'.
+    """
+    query = db.query(models.Document).filter(models.Document.status == "approved")
+
+    # Apply tag filter using SQLite JSON functions
+    if tag:
+        tag_stmt = select(1).select_from(func.json_each(models.Document.tags)).where(literal_column("value") == tag)
+        query = query.filter(tag_stmt.exists())
+
+    # Apply folder filter
+    if folder:
+        # Normalize folder query path
+        sanitized_folder = sanitize_folder_path(folder)
+        if sanitized_folder:
+            # Match exactly or any subfolder, e.g., "Work/Research" matches "Work/Research" and "Work/Research/DeepMind"
+            query = query.filter(
+                or_(
+                    models.Document.folder == sanitized_folder,
+                    models.Document.folder.like(f"{sanitized_folder}/%")
+                )
+            )
+
+    # Apply general query search
+    if q:
+        tag_search_stmt = select(1).select_from(func.json_each(models.Document.tags)).where(literal_column("value").like(f"%{q}%"))
+        query = query.filter(
+            or_(
+                models.Document.filename.like(f"%{q}%"),
+                models.Document.summary.like(f"%{q}%"),
+                models.Document.folder.like(f"%{q}%"),
+                tag_search_stmt.exists()
+            )
+        )
+
+    return query.all()
+
+
+@router.get(
+    "/api/v1/documents/{id}",
+    response_model=schemas.DocumentContentResponse,
+)
+def get_document_content(
+    id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Retrieve the full metadata and markdown text content of an approved document.
+    Protected by JWT Bearer token authentication.
+    """
+    doc = db.query(models.Document).filter(models.Document.id == id).first()
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found."
+        )
+
+    if doc.status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Document has not been approved."
+        )
+
+    # Resolve the path to the markdown file
+    if doc.file_type == "md":
+        target_path = doc.file_path
+    elif doc.file_type == "pdf":
+        target_path = os.path.splitext(doc.file_path)[0] + ".md"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported document file type for content extraction."
+        )
+
+    # Read the markdown text content
+    if not os.path.exists(target_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Markdown content file not found for this document."
+        )
+
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read document content: {str(e)}"
+        )
+
+    # Build response manually or map fields
+    return schemas.DocumentContentResponse(
+        id=doc.id,
+        filename=doc.filename,
+        file_type=doc.file_type,
+        status=doc.status,
+        summary=doc.summary,
+        tags=doc.tags,
+        folder=doc.folder,
+        uploader_id=doc.uploader_id,
+        created_at=doc.created_at,
+        approved_at=doc.approved_at,
+        approved_by=doc.approved_by,
+        content=content
+    )

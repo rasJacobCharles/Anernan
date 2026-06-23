@@ -1,0 +1,4 @@
+{
+  "extractTicketFromBranch": false,
+  "allowScopeFromChanges": true
+}

@@ -161,7 +161,7 @@ async def upload_document(
 
 
 @router.get(
-    "/api/v1/admin/pending",
+    "/api/v1/pending",
     response_model=List[schemas.DocumentResponse],
 )
 def list_pending_documents(
@@ -169,7 +169,7 @@ def list_pending_documents(
     current_admin: models.User = Depends(get_current_admin),
 ):
     """
-    List all documents currently pending admin review.
+    List all documents currently pending review.
     """
     pending_docs = (
         db.query(models.Document)
@@ -180,7 +180,7 @@ def list_pending_documents(
 
 
 @router.post(
-    "/api/v1/admin/documents/{id}/approve",
+    "/api/v1/pending/{id}",
     response_model=schemas.DocumentResponse,
 )
 def approve_document(
@@ -246,7 +246,7 @@ def approve_document(
     return doc
 
 
-@router.post("/api/v1/admin/documents/{id}/reject")
+@router.delete("/api/v1/pending/{id}")
 def reject_document(
     id: str,
     db: Session = Depends(get_db),

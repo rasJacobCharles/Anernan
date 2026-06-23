@@ -196,3 +196,135 @@ def test_document_subfolder_lifecycle_integration():
     assert os.path.exists(active_md)
     with open(active_pdf, "rb") as f:
         assert f.read() == file_content
+
+
+def test_search_and_retrieval_endpoints():
+    user_headers = get_auth_header("user")
+    admin_headers = get_auth_header("admin")
+
+    # 1. Upload Doc 1 (approved md)
+    doc1_content = b"# Design Study\nA study of interface aesthetics."
+    files = {"file": ("design.md", doc1_content, "text/markdown")}
+    data = {
+        "summary": "A design study about aesthetic interfaces.",
+        "tags": '["UI", "Aesthetics"]',
+        "folder": "Work/Design"
+    }
+    res1 = client.post("/api/v1/documents/upload", files=files, data=data, headers=user_headers)
+    assert res1.status_code == 201
+    doc1_id = res1.json()["id"]
+
+    # Approve Doc 1
+    client.post(f"/api/v1/pending/{doc1_id}", headers=admin_headers)
+
+    # 2. Upload Doc 2 (approved pdf with companion markdown)
+    pdf_content = b"PDF data"
+    files = {"file": ("paper.pdf", pdf_content, "application/pdf")}
+    data = {
+        "pre_parsed_markdown": "This is the AI paper content in markdown.",
+        "summary": "Machine learning paper.",
+        "tags": '["AI", "DeepMind"]',
+        "folder": "Work/Research"
+    }
+    res2 = client.post("/api/v1/documents/upload", files=files, data=data, headers=user_headers)
+    assert res2.status_code == 201
+    doc2_id = res2.json()["id"]
+
+    # Approve Doc 2
+    client.post(f"/api/v1/pending/{doc2_id}", headers=admin_headers)
+
+    # 3. Upload Doc 3 (pending md, will not be approved)
+    doc3_content = b"# Pasta Recipe\nHow to make pasta."
+    files = {"file": ("pasta.md", doc3_content, "text/markdown")}
+    data = {
+        "summary": "Delicious dinner recipe.",
+        "tags": '["Cooking"]',
+        "folder": "Personal/Recipes"
+    }
+    res3 = client.post("/api/v1/documents/upload", files=files, data=data, headers=user_headers)
+    assert res3.status_code == 201
+    doc3_id = res3.json()["id"]
+
+    # 4. Try querying search endpoint without token (should fail with 401)
+    response = client.get("/api/v1/search")
+    assert response.status_code == 401
+
+    # 5. Search with q
+    # Search for "aesthetic"
+    response = client.get("/api/v1/search", params={"q": "aesthetic"}, headers=user_headers)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 1
+    assert results[0]["id"] == doc1_id
+
+    # Search for "Cooking" (should be empty as Doc 3 is pending)
+    response = client.get("/api/v1/search", params={"q": "Cooking"}, headers=user_headers)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 0
+
+    # 6. Search with tag
+    # Search tag "UI"
+    response = client.get("/api/v1/search", params={"tag": "UI"}, headers=user_headers)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 1
+    assert results[0]["id"] == doc1_id
+
+    # Search tag "AI"
+    response = client.get("/api/v1/search", params={"tag": "AI"}, headers=user_headers)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 1
+    assert results[0]["id"] == doc2_id
+
+    # Search tag "Cooking" (should be empty)
+    response = client.get("/api/v1/search", params={"tag": "Cooking"}, headers=user_headers)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 0
+
+    # 7. Search with folder
+    # Filter folder "Work/Design"
+    response = client.get("/api/v1/search", params={"folder": "Work/Design"}, headers=user_headers)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 1
+    assert results[0]["id"] == doc1_id
+
+    # Filter folder "Work" (should match both Doc 1 and Doc 2 via subfolder matching)
+    response = client.get("/api/v1/search", params={"folder": "Work"}, headers=user_headers)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 2
+    ids = {r["id"] for r in results}
+    assert ids == {doc1_id, doc2_id}
+
+    # Filter folder "Personal" (should be empty because Doc 3 is pending)
+    response = client.get("/api/v1/search", params={"folder": "Personal"}, headers=user_headers)
+    assert response.status_code == 200
+    assert len(response.json()) == 0
+
+    # 8. Retrieve document content
+    # Retrieve Doc 1 (approved markdown)
+    response = client.get(f"/api/v1/documents/{doc1_id}", headers=user_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == doc1_id
+    assert data["content"] == "# Design Study\nA study of interface aesthetics."
+
+    # Retrieve Doc 2 (approved PDF with companion markdown)
+    response = client.get(f"/api/v1/documents/{doc2_id}", headers=user_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == doc2_id
+    assert data["content"] == "This is the AI paper content in markdown."
+
+    # Retrieve Doc 3 (pending, should return 403 Forbidden)
+    response = client.get(f"/api/v1/documents/{doc3_id}", headers=user_headers)
+    assert response.status_code == 403
+
+    # Retrieve non-existent document
+    response = client.get("/api/v1/documents/non-existent-id", headers=user_headers)
+    assert response.status_code == 404
+

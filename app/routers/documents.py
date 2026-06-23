@@ -43,6 +43,19 @@ except Exception:
     os.makedirs(ACTIVE_DIR, exist_ok=True)
 
 
+def sanitize_folder_path(folder: Optional[str]) -> Optional[str]:
+    """
+    Sanitizes relative folder paths to prevent directory traversal attacks
+    and removes any trailing/leading slashes.
+    """
+    if not folder:
+        return None
+    parts = [p.strip() for p in folder.replace("\\", "/").split("/") if p.strip() and p.strip() not in (".", "..")]
+    if not parts:
+        return None
+    return "/".join(parts)
+
+
 @router.post(
     "/api/v1/documents/upload",
     response_model=schemas.DocumentResponse,
@@ -53,6 +66,7 @@ async def upload_document(
     pre_parsed_markdown: Optional[str] = Form(None),
     summary: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
+    folder: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -150,6 +164,7 @@ async def upload_document(
         status="pending_approval",
         summary=summary,
         tags=parsed_tags,
+        folder=sanitize_folder_path(folder),
         uploader_id=current_user.id
     )
 
@@ -161,7 +176,7 @@ async def upload_document(
 
 
 @router.get(
-    "/api/v1/admin/pending",
+    "/api/v1/pending",
     response_model=List[schemas.DocumentResponse],
 )
 def list_pending_documents(
@@ -169,7 +184,7 @@ def list_pending_documents(
     current_admin: models.User = Depends(get_current_admin),
 ):
     """
-    List all documents currently pending admin review.
+    List all documents currently pending review.
     """
     pending_docs = (
         db.query(models.Document)
@@ -180,7 +195,7 @@ def list_pending_documents(
 
 
 @router.post(
-    "/api/v1/admin/documents/{id}/approve",
+    "/api/v1/pending/{id}",
     response_model=schemas.DocumentResponse,
 )
 def approve_document(
@@ -207,7 +222,15 @@ def approve_document(
         )
 
     old_file_path = doc.file_path
-    new_file_path = os.path.join(ACTIVE_DIR, os.path.basename(old_file_path))
+    
+    # Calculate target active directory based on folder structure
+    target_active_dir = ACTIVE_DIR
+    if doc.folder:
+        folder_parts = doc.folder.split("/")
+        target_active_dir = os.path.join(ACTIVE_DIR, *folder_parts)
+        os.makedirs(target_active_dir, exist_ok=True)
+        
+    new_file_path = os.path.join(target_active_dir, os.path.basename(old_file_path))
 
     # Ensure the physical file exists in quarantine
     if not os.path.exists(old_file_path):
@@ -246,7 +269,7 @@ def approve_document(
     return doc
 
 
-@router.post("/api/v1/admin/documents/{id}/reject")
+@router.delete("/api/v1/pending/{id}")
 def reject_document(
     id: str,
     db: Session = Depends(get_db),
